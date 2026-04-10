@@ -15,6 +15,8 @@ This repository takes the opposite path. It explores how far you can go with **p
 
 This is agentic engineering with zero operational overhead.
 
+Frequent human-in-the-loop interaction is by design, not a limitation. Agents ask for approval before writing, merging, or restructuring — this keeps the human in control and prevents blind spots from accumulating silently in the documentation or the implementation.
+
 ## What's Inside
 
 The repository contains two complementary systems, both fully implemented as VS Code Copilot custom agents, hooks, and instruction files.
