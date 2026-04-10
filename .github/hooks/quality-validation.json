@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "type": "command",
+        "windows": "powershell -ExecutionPolicy Bypass -File .github/hooks/scripts/validate-quality.ps1",
+        "command": "pwsh -File .github/hooks/scripts/validate-quality.ps1",
+        "timeout": 15
+      }
+    ]
+  }
+}
