@@ -34,7 +34,7 @@ Key design choices:
 - **Read-biased, write-controlled.** Agents read freely but can only write with explicit user approval, preventing memory pollution
 - **Self-validating.** A `PostToolUse` hook automatically checks structure, naming, and index consistency after every file operation
 
-The system includes three specialized agents: a **reviewer** (read-only semantic analysis for redundancy and conflicts), a **fixer** (applies corrections one at a time with user approval), and an **importer** (migrates existing documentation into memory format).
+The system includes six specialized agents organized in an **orchestrator-subagent pattern**: a **reviewer** orchestrates read-only analysis by delegating deep file comparisons to a **deep-analyzer** subagent; a **fixer** dispatches corrections to a **conflict-resolver** subagent (for merges) and a **file-splitter** subagent (for oversized files); and an **importer** migrates existing documentation, delegating large file splits to the same splitter. Orchestrators keep their context lean by only reading INDEX metadata and routing — content-heavy work is always handled by subagents with fresh context.
 
 > Full design document: [`artifacts/PersonalFrameworkIdeas/agent-memory-system.md`](artifacts/PersonalFrameworkIdeas/agent-memory-system.md)
 
@@ -65,7 +65,8 @@ Both systems converge on the same architectural patterns — a lightweight agent
 | **Index-based navigation** | Agents discover content through `INDEX.md` files instead of scanning directories or loading everything |
 | **Read-only reviewers → write-capable fixers** | Separation of concerns: analysis agents cannot modify anything; fixer agents require user approval for every change |
 | **PostToolUse hooks for guardrails** | Lightweight validation scripts that fire after agent actions and inject feedback into the conversation context |
-| **Handoffs over subagents** | When downstream agents need the full conversation history (reports, decisions), handoffs preserve context; subagents are used only for stateless tasks |
+| **Handoffs for context, subagents for isolation** | When downstream agents need conversation history (reports, decisions), handoffs preserve context. When they need clean context for isolated tasks, subagents start stateless |
+| **Orchestrator-subagent delegation** | Orchestrator agents read only metadata and route decisions. Content-heavy analysis, splitting, and merging are delegated to subagents with fresh context windows, keeping quality stable as memory grows |
 | **Human-in-the-loop by default** | No agent writes, deletes, or restructures without explicit user confirmation |
 
 ## Repository Structure
@@ -74,9 +75,12 @@ Both systems converge on the same architectural patterns — a lightweight agent
 .github/
 ├── copilot-instructions.md          # Always-on rules for all agents
 ├── agents/                          # Custom Copilot agents
-│   ├── memory-reviewer.agent.md
-│   ├── memory-fixer.agent.md
-│   ├── memory-importer.agent.md
+│   ├── memory-reviewer.agent.md       # Orchestrates review via INDEX triage + subagent
+│   ├── memory-deep-analyzer.agent.md  # Subagent: deep file analysis (read-only)
+│   ├── memory-fixer.agent.md          # Dispatcher: routes fixes to subagents
+│   ├── memory-conflict-resolver.agent.md # Subagent: merge/conflict resolution
+│   ├── memory-file-splitter.agent.md  # Subagent: splits large files
+│   ├── memory-importer.agent.md       # Imports docs, delegates splits
 │   ├── md-auditor.agent.md
 │   ├── md-fixer.agent.md
 │   ├── norms-builder.agent.md

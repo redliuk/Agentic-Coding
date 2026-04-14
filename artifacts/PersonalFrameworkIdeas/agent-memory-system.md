@@ -31,9 +31,12 @@ The memory system solves this by giving agents a structured, persistent knowledg
 .github/
 ├── copilot-instructions.md         ← Always-on rules for all agents
 ├── agents/
-│   ├── memory-reviewer.agent.md    ← Finds redundancy and conflicts (read-only)
-│   ├── memory-fixer.agent.md       ← Fixes issues under user guidance
-│   └── memory-importer.agent.md    ← Imports existing docs into memory
+│   ├── memory-reviewer.agent.md    ← Orchestrates review via INDEX triage + subagent delegation
+│   ├── memory-deep-analyzer.agent.md ← Subagent: deep file analysis (read-only)
+│   ├── memory-fixer.agent.md       ← Dispatcher: routes fixes to subagents
+│   ├── memory-conflict-resolver.agent.md ← Subagent: executes merge/conflict resolution
+│   ├── memory-file-splitter.agent.md    ← Subagent: splits large files preserving all content
+│   └── memory-importer.agent.md    ← Imports existing docs, delegates splits to subagent
 ├── hooks/
 │   ├── memory-validation.json      ← Hook definition (triggers on PostToolUse)
 │   └── scripts/
@@ -166,36 +169,71 @@ The cross-platform `command` field uses `pwsh` (PowerShell Core), while `windows
 
 ### memory-reviewer Agent
 
-A read-only agent that analyzes memory for semantic quality issues. It uses only `read` and `search` tools — it cannot modify anything.
+A read-only orchestrator that analyzes memory for semantic quality issues. It uses `read`, `search`, and `agent` tools — it cannot modify anything. It delegates deep analysis to the `memory-deep-analyzer` subagent to keep its own context lean.
+
+**Workflow (4 phases):**
+
+1. **Phase 0 — Structural checks.** Verifies INDEX consistency (missing entries, orphan entries) by comparing INDEX.md against actual files on disk. Also checks file sizes: reads only line 150 of each file to detect oversized files (>150 lines) without loading content. Oversized files are flagged for split analysis only — they are excluded from all other analysis types.
+2. **Phase 1 — INDEX-based triage.** Reads all INDEX.md descriptions to identify suspicious pairs: similar topics (→ redundancy/overlap), contradictory descriptions (→ conflict), multi-topic descriptions (→ size). Also flags vague descriptions that make triage impossible. No file content is read — only INDEX metadata.
+3. **Phase 2 — Delegate deep analysis.** For each suspicious group, invokes `memory-deep-analyzer` as a subagent, passing file paths, analysis type, and the suspicion. The subagent reads files with fresh context and returns a structured finding with verdict and evidence.
+4. **Phase 3 — Compile and iterate.** Assembles a numbered report from all findings. Iterates with the user point-by-point until the report is confirmed. Only then offers the "Fix issues" handoff to the fixer.
+
+**Why subagent delegation matters:** the reviewer never reads memory file contents directly (except INDEX.md). By delegating deep analysis to a subagent with clean context, each comparison gets full attention instead of being degraded by accumulated context from other files. This scales regardless of memory size.
 
 **What it checks:**
 
+- **INDEX inconsistencies**: missing or orphan entries
+- **Oversized files**: files exceeding ~150 lines that need splitting
 - **Redundancy**: two files stating the same fact, even with different wording
 - **Conflict**: two files making contradictory claims about the same topic
 - **Overlap**: files that partially cover the same ground and could be merged
+- **Vague INDEX descriptions**: entries too generic to evaluate
 
 **Scope rule**: it only compares files **within the same folder**. Files in different folders are independent domains and are never compared against each other.
 
-**Report format**: for every issue found, it cites the exact file paths, line numbers, and quotes the problematic lines. It also suggests a concrete action (keep/remove/merge/resolve).
+**Report format**: every finding is numbered (#1, #2, ...) so the user can respond point by point. Each finding cites file paths, line numbers, quotes from the subagent analysis, and a suggested action.
 
-**Iterative process**: the reviewer presents its findings, asks the user if they agree, revises if needed, and only after final user confirmation does it offer the handoff to the fixer.
+### memory-deep-analyzer Subagent
+
+A read-only subagent invoked by the reviewer. Receives file paths + an analysis question, reads the files thoroughly with clean context, and returns a structured finding.
+
+**Analysis types:** redundancy, conflict, overlap, size. For size analysis, it produces a concrete **split plan** — proposed output file names, descriptions, and source line ranges — covering 100% of the content. This plan is passed through the fixer to the `memory-file-splitter` for execution.
+
+**Key property:** "not confirmed" is a valid verdict. If the reviewer's suspicion (based on INDEX descriptions) was wrong, the analyzer says so clearly. INDEX descriptions may be misleading — actual content is ground truth.
 
 ### memory-fixer Agent
 
-An agent with full edit permissions (`read`, `search`, `edit`, `execute`) that fixes issues identified by the reviewer. It works **one issue at a time**:
+A dispatcher agent that executes the fixes from the reviewer's approved report. It routes each finding to the appropriate handler, keeping its own context lean by delegating heavy operations to subagents.
 
-1. Read the issue description (from the reviewer handoff or user input)
-2. Propose a specific fix with exact file paths and content changes
-3. Wait for user approval
-4. Execute the fix
-5. Update INDEX.md to keep it consistent
-6. Move to the next issue
+**Routing logic:**
 
-**What it can fix**: naming violations (rename to kebab-case), missing INDEX entries, redundancy (merge files), conflicts (keep one version), overlap (redistribute content).
+| Fix type | Handler |
+|---|---|
+| Structural (naming, INDEX inconsistencies, vague descriptions) | Does directly — lightweight, no file content needed |
+| Size / split | Delegates to `memory-file-splitter` subagent |
+| Merge / redundancy / overlap / conflict | Delegates to `memory-conflict-resolver` subagent |
+
+**Execution model:** the fixer does not re-ask for approval on each fix — the user already validated the report during the reviewer phase. The only exception: before any **file deletion** (e.g., after a merge), the fixer shows what will be deleted and waits for a confirmation checkpoint.
+
+After each fix, the fixer verifies and updates the relevant INDEX.md.
+
+### memory-conflict-resolver Subagent
+
+Invoked by the fixer to execute a single merge or conflict resolution. Receives the fix specification (already user-approved), the file paths, and the target INDEX.md path. Reads the files, applies the resolution, and returns a summary of changes.
+
+**Key rule:** follows the fix specification exactly without reinterpretation. Preserves all unique information when merging — merging means combining, never discarding.
+
+### memory-file-splitter Subagent
+
+Invoked by the fixer (for size fixes) or by the importer (for large source files). Receives a single file to split and the target subfolder path. Reads the file thoroughly, identifies natural topic boundaries, and distributes the content across multiple focused files.
+
+**Primary directive: zero information loss.** Splitting means distributing content, never summarizing or condensing. Specific numbers, config values, command examples, URLs, rationale — all must be preserved in the output files.
+
+Creates/updates the subfolder's INDEX.md with descriptions specific enough for agents to decide whether to read each file without opening it.
 
 ### memory-importer Agent
 
-Used when adopting the memory system on a project that already has documentation. It reads an existing docs folder and proposes an import plan:
+Used when adopting the memory system on a project that already has documentation. It scans an existing docs folder (noting paths and sizes, not reading full content), then proposes an import plan:
 
 - Maps source files to memory files (new or existing)
 - Flattens deep nesting to the two-level maximum
@@ -203,14 +241,46 @@ Used when adopting the memory system on a project that already has documentation
 - Rewrites content to match memory style (concise, bullet points, actionable)
 - Strips out TODOs, task lists, session context, ephemeral notes
 - Merges source files on the same topic into a single memory file
+- **Flags large or multi-topic source files for split** — delegates them to `memory-file-splitter`
 
-The import happens one file at a time with user approval at each step.
+The importer **never summarizes or condenses** content to make it fit. If a source file is too large for a single memory file, it delegates the split to the subagent rather than losing information. The importer passes the file path (not the content) to the subagent, so the subagent reads it with fresh context.
+
+The import plan is approved by the user before execution. Small files are imported directly; large files are delegated to the splitter.
+
+## Subagent Delegation Pattern
+
+The memory system uses subagent delegation to manage context window limits. The core problem: an agent that reads many files accumulates broad context but loses depth — by the time it processes the 15th file, the analysis quality of any specific file has degraded.
+
+**The pattern:** orchestrator agents (reviewer, fixer, importer) do lightweight work themselves (read indexes, route decisions, update indexes) and delegate content-heavy tasks to stateless subagents that start with clean context.
+
+```
+memory-reviewer (reads only INDEX.md, routes)
+  └─ memory-deep-analyzer (reads file content, analyzes)
+
+memory-fixer (reads report, dispatches)
+  ├─ memory-file-splitter (reads one large file, produces N files)
+  └─ memory-conflict-resolver (reads 2+ files, produces merged result)
+
+memory-importer (scans source folder, plans)
+  └─ memory-file-splitter (reads one large source file, produces N files)
+```
+
+**Key design choices:**
+
+- **Pass file paths, not content.** Orchestrators pass paths to subagents so they read files with their own clean context. Pasting content in the prompt would duplicate tokens and defeat the purpose.
+- **Specialized subagents over self-invocation.** An orchestrator calling itself as subagent would carry the full orchestration prompt (irrelevant to the task) and risk recursive loops. Dedicated subagents have focused, minimal prompts.
+- **Subagents for content operations, not structural ones.** Naming fixes, INDEX updates, and other lightweight operations don't benefit from subagent isolation — the orchestrator does them directly.
+- **The approach scales but not infinitely.** Each subagent invocation has setup cost. The system works well for memories with dozens to hundreds of files. At extreme scale, the orchestrators' INDEX-based triage would also degrade.
 
 ### Review → Fix Workflow
 
-The reviewer has a `handoff` to the fixer. After the review completes, a **"Fix issues"** button appears in chat. Clicking it switches to the fixer agent **in the same conversation** — the fixer sees the full review report as context and can start fixing immediately.
+The reviewer has a `handoff` to the fixer. After the review completes, a **"Fix issues"** button appears in chat. Clicking it switches to the fixer agent **in the same conversation** — the fixer sees the full review report as context and can start dispatching fixes immediately.
 
-This is different from subagents, which start stateless. The handoff preserves the entire conversation history, so the fixer doesn't need to re-analyze anything — it just operates on the reviewer's findings.
+This is different from subagents, which start stateless. The handoff preserves the entire conversation history, so the fixer doesn't need to re-analyze anything — it just dispatches each finding to the appropriate subagent based on the already-approved report.
+
+The two mechanisms serve different purposes:
+- **Handoffs** (reviewer → fixer): when the downstream agent needs the full conversation history (the report, user decisions, approved actions)
+- **Subagents** (fixer → splitter, fixer → conflict-resolver): when the downstream agent needs clean context for a specific isolated task
 
 ```yaml
 # In memory-reviewer.agent.md
