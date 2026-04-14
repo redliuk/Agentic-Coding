@@ -1,1 +1,15 @@
-Token git.txt
+# Secrets and credentials
+*.secret
+*.token
+*.key
+*.pem
+*.env
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Editor
+*.swp
+*.swo
+*~
