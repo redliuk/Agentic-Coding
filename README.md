@@ -1,21 +1,18 @@
-# Agentic Coding
+# Agentic Coding — Do More with Less
 
-**Do more with less.** A lightweight framework for controlled, scalable agentic coding using nothing but the file system, Markdown files, and VS Code with GitHub Copilot.
+A lightweight framework for agentic coding using nothing but the file system, Markdown files, and VS Code with GitHub Copilot. Built for Copilot agent mode, but adaptable to other agentic environments such as Claude Code or Codex.
 
 ## The Idea
 
-AI coding agents are powerful, but using them on real projects — consistently, reliably, and without chaos — is hard. Most approaches to "agent engineering" reach for heavy infrastructure: databases, vector stores, custom tooling, complex orchestration layers.
+Use **plain Markdown files and the file system as the only infrastructure** to give AI agents persistent memory, enforced quality standards, and structured workflows — with no databases, no vector stores, no external services.
 
-This repository takes the opposite path. It explores how far you can go with **plain Markdown files and the file system as the only infrastructure**. The goal is a practical framework where:
+Core principles:
 
-- Agents have **persistent, structured context** across sessions — without a database
-- Agent-authored files follow **enforced quality standards** — without a CI pipeline
-- Everything is **version-controlled, human-readable, and diffable** — because it's just `.md` files in `.github/`
-- The entire system runs **inside VS Code** with GitHub Copilot — no external services, no API keys, no deployment
+- **Agents retain context across sessions** through a file-based memory system — no database required
+- **Everything is version-controlled, human-readable, and diffable** — it's just `.md` files in `.github/`
+- **Zero operational overhead** — no API keys, no deployment, no infrastructure beyond the editor
 
-This is agentic engineering with zero operational overhead.
-
-Frequent human-in-the-loop interaction is by design, not a limitation. Agents ask for approval before writing, merging, or restructuring — this keeps the human in control and prevents blind spots from accumulating silently in the documentation or the implementation.
+Frequent human-in-the-loop interaction is a deliberate design choice. Agents require explicit approval before writing, merging, or restructuring — the goal is to maintain strong control over the project and minimize technical debt by preventing undocumented assumptions or silent drift in the codebase.
 
 ## What's Inside
 
@@ -33,8 +30,9 @@ Key design choices:
 - **Navigated, not dumped.** Agents follow indexes to find relevant context instead of loading everything into the context window
 - **Read-biased, write-controlled.** Agents read freely but can only write with explicit user approval, preventing memory pollution
 - **Self-validating.** A `PostToolUse` hook automatically checks structure, naming, and index consistency after every file operation
+- **Project-scoped, not shared.** Unlike cross-project knowledge bases such as LLM Wiki, this memory is intentionally standalone — scoped to a single project with no interconnection to others. This keeps the memory compact and focused, mitigating context explosion and preserving accuracy of project-specific information
 
-The system includes six specialized agents organized in an **orchestrator-subagent pattern**: a **reviewer** orchestrates read-only analysis by delegating deep file comparisons to a **deep-analyzer** subagent; a **fixer** dispatches corrections to a **conflict-resolver** subagent (for merges) and a **file-splitter** subagent (for oversized files); and an **importer** migrates existing documentation, delegating large file splits to the same splitter. Orchestrators keep their context lean by only reading INDEX metadata and routing — content-heavy work is always handled by subagents with fresh context.
+The system includes six specialized agents: a **reviewer** (orchestrates read-only analysis), a **deep-analyzer** (detects redundancy, conflicts, and overlap), a **conflict-resolver** (executes merge and conflict resolution from approved specs), a **file-splitter** (breaks large files into focused topics), a **fixer** (applies corrections one at a time with user approval), and an **importer** (migrates existing docs into memory format).
 
 > Full design document: [`artifacts/PersonalFrameworkIdeas/agent-memory-system.md`](artifacts/PersonalFrameworkIdeas/agent-memory-system.md)
 
@@ -65,8 +63,7 @@ Both systems converge on the same architectural patterns — a lightweight agent
 | **Index-based navigation** | Agents discover content through `INDEX.md` files instead of scanning directories or loading everything |
 | **Read-only reviewers → write-capable fixers** | Separation of concerns: analysis agents cannot modify anything; fixer agents require user approval for every change |
 | **PostToolUse hooks for guardrails** | Lightweight validation scripts that fire after agent actions and inject feedback into the conversation context |
-| **Handoffs for context, subagents for isolation** | When downstream agents need conversation history (reports, decisions), handoffs preserve context. When they need clean context for isolated tasks, subagents start stateless |
-| **Orchestrator-subagent delegation** | Orchestrator agents read only metadata and route decisions. Content-heavy analysis, splitting, and merging are delegated to subagents with fresh context windows, keeping quality stable as memory grows |
+| **Handoffs over subagents** | When downstream agents need the full conversation history (reports, decisions), handoffs preserve context; subagents are used only for stateless tasks |
 | **Human-in-the-loop by default** | No agent writes, deletes, or restructures without explicit user confirmation |
 
 ## Repository Structure
@@ -75,12 +72,12 @@ Both systems converge on the same architectural patterns — a lightweight agent
 .github/
 ├── copilot-instructions.md          # Always-on rules for all agents
 ├── agents/                          # Custom Copilot agents
-│   ├── memory-reviewer.agent.md       # Orchestrates review via INDEX triage + subagent
-│   ├── memory-deep-analyzer.agent.md  # Subagent: deep file analysis (read-only)
-│   ├── memory-fixer.agent.md          # Dispatcher: routes fixes to subagents
-│   ├── memory-conflict-resolver.agent.md # Subagent: merge/conflict resolution
-│   ├── memory-file-splitter.agent.md  # Subagent: splits large files
-│   ├── memory-importer.agent.md       # Imports docs, delegates splits
+│   ├── memory-reviewer.agent.md
+│   ├── memory-deep-analyzer.agent.md
+│   ├── memory-conflict-resolver.agent.md
+│   ├── memory-file-splitter.agent.md
+│   ├── memory-fixer.agent.md
+│   ├── memory-importer.agent.md
 │   ├── md-auditor.agent.md
 │   ├── md-fixer.agent.md
 │   ├── norms-builder.agent.md

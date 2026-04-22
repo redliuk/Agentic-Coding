@@ -4,6 +4,12 @@
 
 This project uses a file-based memory system located at `.github/memory/`.
 
+### Copilot internal memory — DO NOT USE
+
+- **Never** use the Copilot built-in memory tool (`/memories/`) to store, read, or manage project knowledge.
+- All persistent notes, decisions, and procedures **must** be stored in `.github/memory/` 
+- If the user asks to "save to memory", "update memory", or "remember this", always use `.github/memory/` — never `/memories/`.
+
 ### Reading memory
 
 Before reading from `.github/memory/`, follow these rules:
